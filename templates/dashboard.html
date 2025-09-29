@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 FiveM Server Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .status-bar {
+            background: #1a1a1a;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #333;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #00ff00;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background: #1e1e1e;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border: 1px solid #333;
+        }
+
+        .panel h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .log-container {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px;
+            background: #0f0f0f;
+        }
+
+        .log-entry {
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            background: rgba(102, 126, 234, 0.1);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .log-entry.admin { border-left-color: #ff6b6b; background: rgba(255, 107, 107, 0.1); }
+        .log-entry.report { border-left-color: #4ecdc4; background: rgba(78, 205, 196, 0.1); }
+        .log-entry.alert { border-left-color: #feca57; background: rgba(254, 202, 87, 0.1); }
+
+        .log-timestamp {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 4px;
+        }
+
+        .log-content {
+            color: #fff;
+            word-wrap: break-word;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .stat-box {
+            background: rgba(102, 126, 234, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #ccc;
+            margin-top: 5px;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 12px;
+            background: #0f0f0f;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            margin-bottom: 15px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .alert-banner {
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            color: #000;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            animation: alertPulse 1s infinite;
+        }
+
+        @keyframes alertPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .chart-container {
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .player-list {
+            list-style: none;
+        }
+
+        .player-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .player-name {
+            color: #4ecdc4;
+        }
+
+        .player-id {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        /* Responsive design */
+        @media (max-width: 1200px) {
+            .dashboard {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎮 FiveM Server Monitor</h1>
+        <p>Real-time server monitoring and webhook interceptor</p>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="status-dot" id="connectionStatus"></div>
+            <span id="connectionText">Connecting...</span>
+        </div>
+        <div class="status-item">
+            <span>📊 Total Logs: <strong id="totalLogs">0</strong></span>
+        </div>
+        <div class="status-item">
+            <span>⚡ Live Since: <strong id="startTime"></strong></span>
+        </div>
+    </div>
+
+    <div id="alertBanner" class="alert-banner" style="display: none;">
+        🚨 SECURITY ALERT: Suspicious activity detected!
+    </div>
+
+    <div class="dashboard">
+        <!-- Live Chat/Reports -->
+        <div class="panel">
+            <h3>💬 Live Chat & Reports</h3>
+            <input type="text" class="search-box" id="chatSearch" placeholder="🔍 Search chat logs...">
+            <div class="log-container" id="chatLogs"></div>
+        </div>
+
+        <!-- Admin Actions -->
+        <div class="panel">
+            <h3>👨‍💼 Admin Actions</h3>
+            <div class="log-container" id="adminLogs"></div>
+        </div>
+
+        <!-- Server Stats -->
+        <div class="panel">
+            <h3>📊 Server Statistics</h3>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-number" id="onlinePlayers">0</div>
+                    <div class="stat-label">Players Online</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="adminActions">0</div>
+                    <div class="stat-label">Admin Actions</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="reportsToday">0</div>
+                    <div class="stat-label">Reports Today</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number" id="alertsCount">0</div>
+                    <div class="stat-label">Security Alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Webhook Traffic -->
+        <div class="panel full-width">
+            <h3>🌐 All Webhook Traffic</h3>
+            <input type="text" class="search-box" id="allSearch" placeholder="🔍 Search all logs...">
+            <div class="log-container" id="allLogs" style="height: 300px;"></div>
+        </div>
+
+        <!-- Activity Chart -->
+        <div class="panel full-width">
+            <h3>📈 Activity Timeline</h3>
+            <div class="chart-container">
+                <canvas id="activityChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let activityChart;
+        let activityData = {
+            labels: [],
+            datasets: [{
+                label: 'Server Activity',
+                data: [],
+                borderColor: '#667eea',
+                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                tension: 0.4
+            }]
+        };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('startTime').textContent = new Date().toLocaleTimeString();
+            initActivityChart();
+            loadStats();
+        });
+
+        // Socket events
+        socket.on('connect', function() {
+            document.getElementById('connectionStatus').style.background = '#00ff00';
+            document.getElementById('connectionText').textContent = 'Connected ✅';
+        });
+
+        socket.on('disconnect', function() {
+            document.getElementById('connectionStatus').style.background = '#ff0000';
+            document.getElementById('connectionText').textContent = 'Disconnected ❌';
+        });
+
+        socket.on('new_log', function(data) {
+            addLogEntry('chatLogs', data, 'report');
+            updateStats();
+        });
+
+        socket.on('new_admin_action', function(data) {
+            addLogEntry('adminLogs', data, 'admin');
+            updateStats();
+        });
+
+        socket.on('new_general_log', function(data) {
+            addLogEntry('allLogs', data, '');
+            updateStats();
+        });
+
+        socket.on('alert', function(data) {
+            showAlert(data);
+            updateStats();
+        });
+
+        function addLogEntry(containerId, data, type) {
+            const container = document.getElementById(containerId);
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            
+            const timestamp = new Date(data.timestamp).toLocaleTimeString();
+            const content = data.content || 'No content';
+            
+            entry.innerHTML = `
+                <div class="log-timestamp">${timestamp} - ${data.webhook_source}</div>
+                <div class="log-content">${escapeHtml(content)}</div>
+            `;
+            
+            container.insertBefore(entry, container.firstChild);
+            
+            // Keep only last 50 entries
+            while (container.children.length > 50) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function showAlert(data) {
+            const banner = document.getElementById('alertBanner');
+            banner.textContent = `🚨 ${data.type.toUpperCase()}: ${data.content}`;
+            banner.style.display = 'block';
+            
+            setTimeout(() => {
+                banner.style.display = 'none';
+            }, 10000);
+        }
+
+        function updateStats() {
+            // Update counters
+            const totalLogs = document.querySelectorAll('.log-entry').length;
+            document.getElementById('totalLogs').textContent = totalLogs;
+            document.getElementById('adminActions').textContent = document.querySelectorAll('.log-entry.admin').length;
+            document.getElementById('reportsToday').textContent = document.querySelectorAll('.log-entry.report').length;
+            document.getElementById('alertsCount').textContent = document.querySelectorAll('.alert-banner:visible').length;
+            
+            // Update activity chart
+            updateActivityChart();
+        }
+
+        function loadStats() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Stats loaded:', data);
+                    // Process and display stats
+                })
+                .catch(error => console.error('Error loading stats:', error));
+        }
+
+        function initActivityChart() {
+            const ctx = document.getElementById('activityChart').getContext('2d');
+            activityChart = new Chart(ctx, {
+                type: 'line',
+                data: activityData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#ccc' }
+                        },
+                        x: {
+                            ticks: { color: '#ccc' }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#ccc' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateActivityChart() {
+            const now = new Date().toLocaleTimeString();
+            activityData.labels.push(now);
+            activityData.datasets[0].data.push(document.querySelectorAll('.log-entry').length);
+            
+            // Keep only last 20 data points
+            if (activityData.labels.length > 20) {
+                activityData.labels.shift();
+                activityData.datasets[0].data.shift();
+            }
+            
+            activityChart.update();
+        }
+
+        // Search functionality
+        document.getElementById('chatSearch').addEventListener('input', function() {
+            filterLogs('chatLogs', this.value);
+        });
+
+        document.getElementById('allSearch').addEventListener('input', function() {
+            filterLogs('allLogs', this.value);
+        });
+
+        function filterLogs(containerId, query) {
+            const container = document.getElementById(containerId);
+            const entries = container.querySelectorAll('.log-entry');
+            
+            entries.forEach(entry => {
+                const text = entry.textContent.toLowerCase();
+                entry.style.display = text.includes(query.toLowerCase()) ? 'block' : 'none';
+            });
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadStats, 30000);
+    </script>
+</body>
+</html>
